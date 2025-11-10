@@ -1,0 +1,7 @@
+include src/trent_agent/**/*.py
+include src/trent_agent/config/*.yaml
+include src/trent_agent/config/serviceAccountKey.json
+include requirements.txt
+include pyproject.toml
+exclude **/__pycache__
+exclude **/*.pyc

@@ -1,0 +1,8 @@
+# Ignore patterns for CrewAI deployment
+*.pyc
+__pycache__/
+.env
+.venv/
+dist/
+build/
+*.egg-info/

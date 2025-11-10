@@ -1,0 +1,46 @@
+[project]
+name = "trent_agent"
+version = "0.1.0"
+description = "trent-agent using crewAI"
+authors = [{ name = "Your Name", email = "you@example.com" }]
+requires-python = ">=3.10,<3.14"
+dependencies = [
+    "crewai>=0.201.1,<1.0.0",
+    "firebase-admin>=7.1.0",
+    "typing-extensions>=4.15.0",
+]
+packages = [
+    { include = "trent_agent", from = "src" }
+]
+
+[project.scripts]
+trent_agent = "trent_agent.main:run"
+run_crew = "trent_agent.main:run"
+run_firebase = "trent_agent.main:run_firebase"
+train = "trent_agent.main:train"
+replay = "trent_agent.main:replay"
+test = "trent_agent.main:test"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.crewai]
+type = "crew"
+name = "trent-agent"
+description = "Product recommendation agent using Firebase"
+entry_point = "trent_agent.crew:TrentAgent"
+config_path = "src/trent_agent/config"
+requirements = "requirements.txt"
+include_packages = ["trent_agent"]
+exclude_patterns = [
+    "**/__pycache__",
+    "**/*.pyc",
+    ".env",
+    ".venv",
+    "tests"
+]
+environment_variables = [
+    "PYTHONPATH=src",
+    "FIREBASE_SERVICE_ACCOUNT"
+]
