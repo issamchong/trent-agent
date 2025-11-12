@@ -1,447 +1,418 @@
-import os
-import json
 import base64
-import firebase_admin
-from firebase_admin import credentials, firestore
-from pydantic import BaseModel, PrivateAttr, Field
+import json
+import os
+from datetime import datetime
+from typing import Any, Dict, List, Literal, Optional
+
+from google.cloud import firestore
+from google.oauth2 import service_account
 from crewai.tools import BaseTool
-from typing import Dict, Any, List, Optional, TypedDict, Union, Literal
+from pydantic import BaseModel, Field, PrivateAttr
+
 
 class QueryCondition(BaseModel):
     field: str
     operator: str = "=="
     value: Any
 
+
 class FirebaseToolInput(BaseModel):
-    # --- CHANGE: Restrict operations to only 'read' and 'query' ---
-    operation: Literal['read', 'query'] = Field(
-        description="The operation to perform. Only 'read' or 'query' are allowed."
+    operation: Literal["read", "query"] = Field(
+        description="Operation to perform. Only 'read' and 'query' are supported."
     )
-    collection: str = Field(
-        description="The name of the collection to operate on"
-    )
+    collection: str = Field(description="Name of the collection to access")
     document_id: Optional[str] = Field(
         None,
-        description="The ID of the document (required for 'read' operation)"
+        description="Document ID. Required for 'read' operations."
     )
-    # --- CHANGE: 'data' field is removed as it's not needed for read-only operations ---
     query_conditions: Optional[List[QueryCondition]] = Field(
         None,
-        description="List of conditions for querying (used with 'query' operation)"
+        description="Conditions to apply when performing a query operation."
     )
-    return_objects: Optional[bool] = Field(
-        False,
-        description="When querying, return a JSON array of document objects instead of a textual summary"
+    return_objects: bool = Field(
+        default=False,
+        description="When true, return raw JSON documents instead of a human-readable summary."
     )
 
-# --- CHANGE: Updated class to be read-only ---
+
 class FirebaseReadOnlyTool(BaseTool):
-    # --- CHANGE: Updated name and description ---
+    """Read/query helper backed by the Firestore client SDK with snapshot caching."""
+
     name: str = "Firebase Read-Only Tool"
-    description: str = "A tool to read and query data from Firebase Firestore collections. You can read a specific document by its ID or query a collection for multiple documents."
+    description: str = (
+        "Read documents from Firestore using the Google Cloud client library. "
+        "Supports real-time snapshot caching to avoid re-reading full collections."
+    )
     args_schema: type[BaseModel] = FirebaseToolInput
-    
+
     _db: Any = PrivateAttr(default=None)
+    _collection_cache: Dict[str, Dict[str, Any]] = PrivateAttr(default_factory=dict)
 
     def __init__(self):
         super().__init__()
-        self._initialize_firebase()
+        self._collection_cache = {}
+        self._initialize_firestore_client()
 
-    def _initialize_firebase(self):
-        """Initialize Firebase app with service account credentials from a Base64 encoded environment variable."""
-        if not firebase_admin._apps:
-            encoded_credentials = os.getenv('GOOGLE_APPLICATION_CREDENTIALS_JSON')
-            
-            if not encoded_credentials:
-                raise ValueError(
-                    "Firebase credentials not found. Please set the "
-                    "GOOGLE_APPLICATION_CREDENTIALS_JSON environment variable "
-                    "with your Base64 encoded service account JSON."
-                )
-            
-            try:
-                json_credentials_str = base64.b64decode(encoded_credentials).decode('utf-8')
-                service_account_dict = json.loads(json_credentials_str)
-                cred = credentials.Certificate(service_account_dict)
-                
-            except (base64.binascii.Error, json.JSONDecodeError) as e:
-                raise ValueError(
-                    f"Failed to decode or parse the GOOGLE_APPLICATION_CREDENTIALS_JSON "
-                    f"environment variable. Please ensure it is a valid Base64 encoded JSON string. Original error: {e}"
-                )
-            
-            firebase_admin.initialize_app(cred)
+    # ------------------------------------------------------------------
+    # Firestore bootstrap & helpers
+    # ------------------------------------------------------------------
+    def _initialize_firestore_client(self) -> None:
+        encoded_credentials = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+        if not encoded_credentials:
+            raise ValueError(
+                "Missing FIREBASE credentials. Set GOOGLE_APPLICATION_CREDENTIALS_JSON "
+                "to a Base64 encoded service-account JSON."
+            )
 
-        self._db = firestore.client()
-
-    # --- CHANGE: Simplified _run method to only handle 'read' and 'query' ---
-    def _run(self, 
-             operation: str, 
-             collection: str, 
-             document_id: Optional[str] = None,
-             query_conditions: Optional[List[Dict[str, Any]]] = None,
-             return_objects: bool = False) -> str:
-        """
-        Execute read-only Firebase operations.
-
-        Args:
-            operation: The operation to perform ('read' or 'query')
-            collection: The name of the collection
-            document_id: The ID of the document (required for 'read')
-            query_conditions: List of conditions for querying (used with 'query')
-            return_objects: If True, return a JSON array of documents for queries.
-
-        Returns:
-            Result of the operation as a string.
-        """
         try:
-            # --- CHANGE: Logic for 'create', 'update', 'delete' has been removed ---
-            if operation == 'read':
-                if not document_id:
-                    return "Error: document_id is required for read operation"
+            json_credentials_str = base64.b64decode(encoded_credentials).decode("utf-8")
+            service_account_dict = json.loads(json_credentials_str)
+        except (base64.binascii.Error, json.JSONDecodeError) as exc:
+            raise ValueError(
+                "Failed to decode GOOGLE_APPLICATION_CREDENTIALS_JSON; ensure it is a "
+                "valid Base64-encoded JSON string."
+            ) from exc
 
-                doc_ref = self._db.collection(collection).document(document_id)
-                doc = doc_ref.get()
-                if doc.exists:
-                    return f"Document data: {doc.to_dict()}"
-                else:
-                    return f"Document {document_id} not found in collection {collection}"
-
-            elif operation == 'query':
-                collection_ref = self._db.collection(collection)
-                all_results = []
-                total_count = 0
-                
-                try:
-                    # If no query conditions are provided, get all documents
-                    if not query_conditions:
-                        docs = collection_ref.stream()
-                        for doc in docs:
-                            total_count += 1
-                            doc_data = doc.to_dict()
-                            if return_objects:
-                                to_add = doc_data.copy()
-                                to_add['_id'] = doc.id
-                                all_results.append(to_add)
-                            else:
-                                if total_count <= 10:
-                                    summary = {
-                                        'title': doc_data.get('title', 'No title'),
-                                        'status': doc_data.get('status', 'No status'),
-                                        'category': doc_data.get('categoryId', 'No category')
-                                    }
-                                    all_results.append(f"Document: {summary}")
-
-                        if return_objects:
-                            try:
-                                return json.dumps({
-                                    'total': total_count,
-                                    'documents': all_results
-                                }, default=str)
-                            except Exception as e:
-                                return f"Error serializing documents: {str(e)}"
-
-                        summary = [
-                            f"Total documents in collection: {total_count}",
-                            f"Sample of first 10 documents:",
-                            *all_results,
-                            "\nTo get specific document details, use the 'read' operation with a document ID."
-                        ]
-                        return "\n".join(summary)
-                    else:
-                        query = collection_ref
-                        for condition in query_conditions:
-                            field = condition.get('field')
-                            operator = condition.get('operator', '==')
-                            value = condition.get('value')
-
-                            if not field:
-                                return "Error: Each query condition must have a 'field'"
-
-                            if operator == '==':
-                                query = query.where(field, '==', value)
-                            elif operator == '>=':
-                                query = query.where(field, '>=', value)
-                            elif operator == '<=':
-                                query = query.where(field, '<=', value)
-                            elif operator == '>':
-                                query = query.where(field, '>', value)
-                            elif operator == '<':
-                                query = query.where(field, '<', value)
-                            elif operator == 'array-contains':
-                                query = query.where(field, 'array-contains', value)
-                            elif operator == 'array-contains-any':
-                                query = query.where(field, 'array-contains-any', value)
-                            elif operator == 'in':
-                                query = query.where(field, 'in', value)
-                            else:
-                                return f"Error: Unsupported operator {operator}"
-
-                        docs = query.stream()
-                        total_count = 0
-                        for doc in docs:
-                            total_count += 1
-                            doc_data = doc.to_dict()
-                            if return_objects:
-                                to_add = doc_data.copy()
-                                to_add['_id'] = doc.id
-                                all_results.append(to_add)
-                            else:
-                                if total_count <= 10:
-                                    summary = {
-                                        'title': doc_data.get('title', 'No title'),
-                                        'status': doc_data.get('status', 'No status'),
-                                        'category': doc_data.get('categoryId', 'No category')
-                                    }
-                                    all_results.append(f"Document: {summary}")
-
-                        if return_objects:
-                            try:
-                                return json.dumps({
-                                    'total': total_count,
-                                    'documents': all_results
-                                }, default=str)
-                            except Exception as e:
-                                return f"Error serializing documents: {str(e)}"
-
-                        summary = [
-                            f"Total documents matching query: {total_count}",
-                            f"Sample of first 10 matching documents:",
-                            *all_results,
-                            "\nTo get specific document details, use the 'read' operation with a document ID."
-                        ]
-                        return "\n".join(summary)
-                        
-                except Exception as e:
-                    return f"Error during query: {str(e)}"
-
-            else:
-                # --- CHANGE: Updated error message to reflect new allowed operations ---
-                return f"Error: Unsupported operation '{operation}'. This tool only supports 'read' and 'query'."
-
-        except Exception as e:
-            return f"Error executing Firebase operation: {str(e)}"
-
-    name: str = "Firebase Tool"
-    description: str = "A tool to interact with Firebase Firestore collections. You can create, read, update, and delete documents in collections."
-    args_schema: type[BaseModel] = FirebaseToolInput
-    
-    _db: Any = PrivateAttr(default=None)
-
-    def __init__(self):
-        super().__init__()
-        self._initialize_firebase()
-
-    def _initialize_firebase(self):  # <-- FIXED: Removed one space to align with other methods
-        """Initialize Firebase app with service account credentials from a Base64 encoded environment variable."""
-        if not firebase_admin._apps:
-            # Use the new, more descriptive environment variable name
-            encoded_credentials = os.getenv('GOOGLE_APPLICATION_CREDENTIALS_JSON')
-            
-            if not encoded_credentials:
-                raise ValueError(
-                    "Firebase credentials not found. Please set the "
-                    "GOOGLE_APPLICATION_CREDENTIALS_JSON environment variable "
-                    "with your Base64 encoded service account JSON."
-                )
-            
-            try:
-                # Decode from Base64 to bytes, then to a UTF-8 string
-                json_credentials_str = base64.b64decode(encoded_credentials).decode('utf-8')
-                
-                # Parse the JSON string into a Python dictionary
-                service_account_dict = json.loads(json_credentials_str)
-                
-                # Create the credential object
-                cred = credentials.Certificate(service_account_dict)
-                
-            except (base64.binascii.Error, json.JSONDecodeError) as e:
-                # Catch potential errors during decoding or parsing
-                raise ValueError(
-                    f"Failed to decode or parse the GOOGLE_APPLICATION_CREDENTIALS_JSON "
-                    f"environment variable. Please ensure it is a valid Base64 encoded JSON string. Original error: {e}"
-                )
-            
-            firebase_admin.initialize_app(cred)
-
-        self._db = firestore.client()
-
-    def _run(self, 
-             operation: str, 
-             collection: str, 
-             document_id: Optional[str] = None, 
-             data: Optional[Dict[str, Any]] = None,
-             query_conditions: Optional[List[Dict[str, Any]]] = None,
-             return_objects: bool = False) -> str:
-        """
-        Execute Firebase operations.
-
-        Args:
-            operation: The operation to perform ('create', 'read', 'update', 'delete', 'query')
-            collection: The name of the collection
-            document_id: The ID of the document (required for create, read, update, delete)
-            data: The data to write (required for create, update)
-            query_conditions: List of conditions for querying (each condition is a dict with field, operator, value)
-
-        Returns:
-            Result of the operation as a string
-        """
         try:
-            if operation == 'create':
-                if not document_id:
-                    return "Error: document_id is required for create operation"
-                if data is None:
-                    return "Error: data is required for create operation"
+            credentials_obj = service_account.Credentials.from_service_account_info(
+                service_account_dict
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            raise ValueError(f"Failed to construct service account credentials: {exc}")
 
-                doc_ref = self._db.collection(collection).document(document_id)
-                doc_ref.set(data)
-                return f"Document {document_id} created in collection {collection}"
+        project_id = service_account_dict.get("project_id")
+        if not project_id:
+            raise ValueError("Service account JSON must include 'project_id'.")
 
-            elif operation == 'read':
-                if not document_id:
-                    return "Error: document_id is required for read operation"
+        self._db = firestore.Client(project=project_id, credentials=credentials_obj)
 
-                doc_ref = self._db.collection(collection).document(document_id)
-                doc = doc_ref.get()
-                if doc.exists:
-                    return f"Document data: {doc.to_dict()}"
-                else:
-                    return f"Document {document_id} not found in collection {collection}"
+    def _normalize_timestamp(self, value: Any) -> Optional[datetime]:
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value
+        if hasattr(value, "ToDatetime"):
+            return value.ToDatetime()
+        if hasattr(value, "to_datetime"):
+            return value.to_datetime()
+        if isinstance(value, str):
+            try:
+                return datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+        return None
 
-            elif operation == 'update':
-                if not document_id:
-                    return "Error: document_id is required for update operation"
-                if data is None:
-                    return "Error: data is required for update operation"
+    def _update_cache_entry(
+        self,
+        collection: str,
+        doc_id: str,
+        doc_data: Dict[str, Any],
+        last_update_value: Any,
+    ) -> None:
+        cache_entry = self._collection_cache.setdefault(
+            collection,
+            {
+                "documents": {},
+                "last_update": None,
+                "unsubscribe": None,
+                "ready": False,
+            },
+        )
 
-                doc_ref = self._db.collection(collection).document(document_id)
-                doc_ref.update(data)
-                return f"Document {document_id} updated in collection {collection}"
+        cache_entry["documents"][doc_id] = doc_data
 
-            elif operation == 'delete':
-                if not document_id:
-                    return "Error: document_id is required for delete operation"
+        normalized_last_update = self._normalize_timestamp(last_update_value)
+        if normalized_last_update is None:
+            return
 
-                doc_ref = self._db.collection(collection).document(document_id)
-                doc_ref.delete()
-                return f"Document {document_id} deleted from collection {collection}"
+        current_last_update = cache_entry.get("last_update")
+        try:
+            if current_last_update is None or normalized_last_update > current_last_update:
+                cache_entry["last_update"] = normalized_last_update
+        except TypeError:
+            cache_entry["last_update"] = normalized_last_update
 
-            elif operation == 'query':
-                collection_ref = self._db.collection(collection)
-                all_results = []
-                total_count = 0
-                
-                try:
-                    # If no query conditions are provided, get all documents
-                    if not query_conditions:
-                        # First, just count documents
-                        docs = collection_ref.stream()
-                        for doc in docs:
-                            total_count += 1
-                            doc_data = doc.to_dict()
-                            if return_objects:
-                                # collect full objects for downstream processing
-                                to_add = doc_data.copy()
-                                to_add['_id'] = doc.id
-                                all_results.append(to_add)
-                            else:
-                                # Only store summary for human-readable output
-                                if total_count <= 10:  # Only store details for first 10 docs
-                                    summary = {
-                                        'title': doc_data.get('title', 'No title'),
-                                        'status': doc_data.get('status', 'No status'),
-                                        'category': doc_data.get('categoryId', 'No category')
-                                    }
-                                    all_results.append(f"Document: {summary}")
+    def _ensure_collection_listener(self, collection: str) -> Dict[str, Any]:
+        collection_ref = self._db.collection(collection)
+        cache_entry = self._collection_cache.setdefault(
+            collection,
+            {
+                "documents": {},
+                "last_update": None,
+                "unsubscribe": None,
+                "ready": False,
+                "listener_error": False,
+            },
+        )
 
-                        if return_objects:
-                            # Return structured JSON array of documents (stringified)
-                            try:
-                                return json.dumps({
-                                    'total': total_count,
-                                    'documents': all_results
-                                }, default=str)
-                            except Exception as e:
-                                return f"Error serializing documents: {str(e)}"
+        if cache_entry.get("unsubscribe") is None and not cache_entry.get("listener_error"):
+            try:
+                # Define the callback function for on_snapshot (built-in method from google.cloud.firestore)
+                def snapshot_callback(collection_snapshot, changes, read_time):
+                    """
+                    Callback function for collection_ref.on_snapshot().
+                    Handles document changes: ADDED, MODIFIED, REMOVED.
+                    Similar to JS Firebase: snapshot.docChanges().forEach((change) => { ... })
+                    """
+                    entry = self._collection_cache.setdefault(
+                        collection,
+                        {
+                            "documents": {},
+                            "last_update": None,
+                            "unsubscribe": None,
+                            "ready": False,
+                            "listener_error": False,
+                        },
+                    )
 
-                        # Return summary instead of full data
-                        summary = [
-                            f"Total documents in collection: {total_count}",
-                            f"Sample of first 10 documents:",
-                            *all_results,
-                            "\nTo get specific document details, use the 'read' operation with a document ID."
-                        ]
-                        return "\n".join(summary)
+                    # Handle document changes (added, modified, removed)
+                    if changes:
+                        for change in changes:
+                            doc = change.document
+                            change_type = change.type.name  # ADDED, MODIFIED, or REMOVED
+                            
+                            if change_type == "REMOVED":
+                                # Handle removed documents
+                                entry["documents"].pop(doc.id, None)
+                            elif change_type == "ADDED":
+                                # Handle new documents
+                                doc_data = doc.to_dict()
+                                last_update_field = doc_data.get("lastUpdate", getattr(doc, "update_time", None))
+                                self._update_cache_entry(collection, doc.id, doc_data, last_update_field)
+                            elif change_type == "MODIFIED":
+                                # Handle modified documents
+                                doc_data = doc.to_dict()
+                                last_update_field = doc_data.get("lastUpdate", getattr(doc, "update_time", None))
+                                self._update_cache_entry(collection, doc.id, doc_data, last_update_field)
                     else:
-                        query = collection_ref
-                        for condition in query_conditions:
-                            field = condition.get('field')
-                            operator = condition.get('operator', '==')
-                            value = condition.get('value')
-
-                            if not field:
-                                return "Error: Each query condition must have a 'field'"
-
-                            if operator == '==':
-                                query = query.where(field, '==', value)
-                            elif operator == '>=':
-                                query = query.where(field, '>=', value)
-                            elif operator == '<=':
-                                query = query.where(field, '<=', value)
-                            elif operator == '>':
-                                query = query.where(field, '>', value)
-                            elif operator == '<':
-                                query = query.where(field, '<', value)
-                            elif operator == 'array-contains':
-                                query = query.where(field, 'array-contains', value)
-                            elif operator == 'array-contains-any':
-                                query = query.where(field, 'array-contains-any', value)
-                            elif operator == 'in':
-                                query = query.where(field, 'in', value)
-                            else:
-                                return f"Error: Unsupported operator {operator}"
-
-                        # Count and get summary of filtered documents
-                        docs = query.stream()
-                        total_count = 0
-                        for doc in docs:
-                            total_count += 1
+                        # Initial snapshot - populate all documents
+                        for doc in collection_snapshot:
                             doc_data = doc.to_dict()
-                            if return_objects:
-                                to_add = doc_data.copy()
-                                to_add['_id'] = doc.id
-                                all_results.append(to_add)
+                            last_update_field = doc_data.get("lastUpdate", getattr(doc, "update_time", None))
+                            self._update_cache_entry(collection, doc.id, doc_data, last_update_field)
+
+                    entry["ready"] = True
+
+                # Use the built-in on_snapshot method from google.cloud.firestore
+                # This sets up a real-time listener for the collection
+                cache_entry["unsubscribe"] = collection_ref.on_snapshot(snapshot_callback)
+            except AttributeError:
+                cache_entry["listener_error"] = True
+            except Exception:
+                cache_entry["listener_error"] = True
+
+        if not cache_entry.get("ready"):
+            try:
+                docs = list(collection_ref.stream())
+                for doc in docs:
+                    doc_data = doc.to_dict()
+                    last_update_field = doc_data.get("lastUpdate", getattr(doc, "update_time", None))
+                    self._update_cache_entry(collection, doc.id, doc_data, last_update_field)
+                cache_entry["ready"] = True
+            except Exception:
+                cache_entry["listener_error"] = True
+
+        return cache_entry
+
+    def _perform_remote_query(
+        self,
+        collection_ref: Any,
+        collection: str,
+        query_conditions: Optional[List[QueryCondition]],
+        return_objects: bool,
+    ) -> str:
+        query = collection_ref
+        for condition in query_conditions or []:
+            field = condition.field
+            operator = condition.operator
+            value = condition.value
+
+            if not field:
+                return "Error: Each query condition must include a field."
+
+            if operator == "==":
+                query = query.where(field, "==", value)
+            elif operator == ">=":
+                query = query.where(field, ">=", value)
+            elif operator == "<=":
+                query = query.where(field, "<=", value)
+            elif operator == ">":
+                query = query.where(field, ">", value)
+            elif operator == "<":
+                query = query.where(field, "<", value)
+            elif operator == "array-contains":
+                query = query.where(field, "array-contains", value)
+            elif operator == "array-contains-any":
+                query = query.where(field, "array-contains-any", value)
+            elif operator == "in":
+                query = query.where(field, "in", value)
+            else:
+                return f"Error: Unsupported operator '{operator}'."
+
+        try:
+            docs = list(query.stream())
+        except Exception as exc:  # pragma: no cover - remote errors are surfaced to user
+            return f"Error during query: {exc}"
+
+        results: List[Any] = []
+        total_count = 0
+        for doc in docs:
+            total_count += 1
+            doc_data = doc.to_dict()
+            last_update_field = doc_data.get("lastUpdate", getattr(doc, "update_time", None))
+            self._update_cache_entry(collection, doc.id, doc_data, last_update_field)
+            if return_objects:
+                payload = doc_data.copy()
+                payload["_id"] = doc.id
+                results.append(payload)
+            elif total_count <= 10:
+                results.append(
+                    f"Document: {{'title': {doc_data.get('title', 'No title')}, "
+                    f"'status': {doc_data.get('status', 'No status')}, "
+                    f"'category': {doc_data.get('category', 'No category')}}}"
+                )
+
+        if return_objects:
+            try:
+                return json.dumps({"total": total_count, "documents": results}, default=str)
+            except Exception as exc:
+                return f"Error serializing documents: {exc}"
+
+        summary_lines = [
+            f"Total documents matching query: {total_count}",
+            "Sample of first 10 matching documents:",
+            *results,
+            "\nTo get specific document details, use the 'read' operation with a document ID.",
+        ]
+        return "\n".join(summary_lines)
+
+    # ------------------------------------------------------------------
+    # BaseTool hook
+    # ------------------------------------------------------------------
+    def _run(
+        self,
+        operation: str,
+        collection: str,
+        document_id: Optional[str] = None,
+        query_conditions: Optional[List[Dict[str, Any]]] = None,
+        return_objects: bool = False,
+    ) -> str:
+        try:
+            if operation == "read":
+                if not document_id:
+                    return "Error: document_id is required for read operation."
+
+                doc_ref = self._db.collection(collection).document(document_id)
+                doc_snapshot = doc_ref.get()
+                if doc_snapshot.exists:
+                    doc_data = doc_snapshot.to_dict()
+                    last_update_field = doc_data.get("lastUpdate", getattr(doc_snapshot, "update_time", None))
+                    self._update_cache_entry(collection, doc_snapshot.id, doc_data, last_update_field)
+                    return f"Document data: {doc_data}"
+                return f"Document {document_id} not found in collection {collection}."
+
+            if operation == "query":
+                collection_ref = self._db.collection(collection)
+                cache_entry = self._ensure_collection_listener(collection)
+
+                if not query_conditions:
+                    documents = cache_entry.get("documents", {})
+                    total_count = len(documents)
+
+                    if return_objects:
+                        payload = []
+                        for doc_id, doc_data in documents.items():
+                            item = doc_data.copy()
+                            item["_id"] = doc_id
+                            payload.append(item)
+                        try:
+                            return json.dumps({"total": total_count, "documents": payload}, default=str)
+                        except Exception as exc:
+                            return f"Error serializing documents: {exc}"
+
+                    summaries: List[str] = []
+                    for idx, doc_data in enumerate(documents.values(), start=1):
+                        if idx > 10:
+                            break
+                        summaries.append(
+                            f"Document: {{'title': {doc_data.get('title', 'No title')}, "
+                            f"'status': {doc_data.get('status', 'No status')}, "
+                            f"'category': {doc_data.get('category', 'No category')}}}"
+                        )
+
+                    lines = [
+                        f"Total documents in collection: {total_count}",
+                        "Sample of first 10 documents:",
+                        *summaries,
+                        "\nTo get specific document details, use the 'read' operation with a document ID.",
+                    ]
+                    return "\n".join(lines)
+
+                # Convert condition dicts to QueryCondition models
+                parsed_conditions = [
+                    QueryCondition(**condition) if not isinstance(condition, QueryCondition) else condition
+                    for condition in query_conditions
+                ]
+
+                if cache_entry.get("ready") and not cache_entry.get("listener_error"):
+                    documents = cache_entry.get("documents", {})
+                    matching_docs: List[Dict[str, Any]] = []
+                    unsupported_operator = False
+
+                    for doc_id, doc_data in documents.items():
+                        matches = True
+                        for condition in parsed_conditions:
+                            doc_value = doc_data.get(condition.field)
+
+                            if condition.operator == "==":
+                                if doc_value != condition.value:
+                                    matches = False
+                                    break
                             else:
-                                if total_count <= 10:
-                                    summary = {
-                                        'title': doc_data.get('title', 'No title'),
-                                        'status': doc_data.get('status', 'No status'),
-                                        'category': doc_data.get('categoryId', 'No category')
-                                    }
-                                    all_results.append(f"Document: {summary}")
+                                unsupported_operator = True
+                                break
+
+                        if unsupported_operator:
+                            break
+
+                        if matches:
+                            payload = doc_data.copy()
+                            payload["_id"] = doc_id
+                            matching_docs.append(payload)
+
+                    if not unsupported_operator:
+                        total_count = len(matching_docs)
 
                         if return_objects:
                             try:
-                                return json.dumps({
-                                    'total': total_count,
-                                    'documents': all_results
-                                }, default=str)
-                            except Exception as e:
-                                return f"Error serializing documents: {str(e)}"
+                                return json.dumps(
+                                    {"total": total_count, "documents": matching_docs}, default=str
+                                )
+                            except Exception as exc:
+                                return f"Error serializing documents: {exc}"
 
-                        summary = [
+                        summaries = []
+                        for idx, doc_data in enumerate(matching_docs, start=1):
+                            if idx > 10:
+                                break
+                            summaries.append(
+                                f"Document: {{'title': {doc_data.get('title', 'No title')}, "
+                                f"'status': {doc_data.get('status', 'No status')}, "
+                                f"'category': {doc_data.get('category', 'No category')}}}"
+                            )
+
+                        lines = [
                             f"Total documents matching query: {total_count}",
-                            f"Sample of first 10 matching documents:",
-                            *all_results,
-                            "\nTo get specific document details, use the 'read' operation with a document ID."
+                            "Sample of first 10 matching documents:",
+                            *summaries,
+                            "\nTo get specific document details, use the 'read' operation with a document ID.",
                         ]
-                        return "\n".join(summary)
-                        
-                except Exception as e:
-                    return f"Error during query: {str(e)}"
+                        return "\n".join(lines)
 
-            else:
-                return f"Error: Unsupported operation {operation}. Supported operations are: create, read, update, delete, query"
+                # Fall back to remote filtering if local cache can't handle it
+                return self._perform_remote_query(collection_ref, collection, parsed_conditions, return_objects)
 
-        except Exception as e:
-            return f"Error executing Firebase operation: {str(e)}"
+            return ("Error: Unsupported operation. Only 'read' and 'query' are allowed.")
+
+        except Exception as exc:  # pragma: no cover - defensive catch for tool surface
+            return f"Error executing Firebase operation: {exc}"
