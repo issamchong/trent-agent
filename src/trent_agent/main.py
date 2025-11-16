@@ -16,6 +16,7 @@ PDF = '\u202C'  # Pop Directional Formatting
 def ensure_rtl_formatting(text):
     """
     Ensure Arabic text has RTL direction markers for proper right-to-left display.
+    Applies RTL markers only to Arabic text segments, not to enumeration or formatting.
     """
     if not text:
         return text
@@ -23,12 +24,36 @@ def ensure_rtl_formatting(text):
     # Check if text contains Arabic characters
     arabic_pattern = re.compile(r'[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]')
     
-    # If text contains Arabic but doesn't start with RLE, add RTL markers
-    if arabic_pattern.search(text) and not text.startswith(RLE):
-        # Wrap the entire text with RTL markers
-        return f"{RLE}{text}{PDF}"
+    if not arabic_pattern.search(text):
+        return text
     
-    return text
+    # Remove existing RTL markers (both Unicode chars and literal escape sequences) to avoid duplication
+    text = text.replace(RLE, '').replace(PDF, '')
+    # Also remove literal escape sequences that might be in the string
+    text = text.replace('\\u202B', '').replace('\\u202C', '')
+    text = text.replace('\u202B', '').replace('\u202C', '')
+    
+    # Split text into lines to handle multi-line text properly
+    lines = text.split('\n')
+    formatted_lines = []
+    
+    for line in lines:
+        if not line:
+            formatted_lines.append('')
+            continue
+        
+        # Check if line contains Arabic
+        if arabic_pattern.search(line):
+            # Wrap the entire line with RTL markers if it contains Arabic
+            # This is more efficient and produces cleaner output
+            formatted_lines.append(f"{RLE}{line}{PDF}")
+        else:
+            # No Arabic in this line, keep as-is
+            formatted_lines.append(line)
+    
+    result = '\n'.join(formatted_lines)
+    
+    return result
 
 # This main file is intended to be a way for you to run your
 # crew locally, so refrain from adding unnecessary logic into this file.

@@ -1,7 +1,8 @@
-from crewai import Agent, Crew, Process, Task
+from crewai import Agent, Crew, Process, Task, LLM
 from crewai.project import CrewBase, agent, crew, task
 from crewai.agents.agent_builder.base_agent import BaseAgent
 from typing import List
+import os
 from trent_agent.tools import FirebaseReadOnlyTool
 
 @CrewBase
@@ -14,10 +15,24 @@ class TrentAgent():
   
     @agent
     def firebase_agent(self) -> Agent:
+        # Configure Gemini LLM (using 2.5 Flash as requested)
+        gemini_api_key = os.getenv("GEMINI_API_KEY", "AIzaSyBmzUgklO1DTbiI8IVB9XsKHJFl41RUwGU")
+        
+        # Set environment variable for LiteLLM (required for Gemini)
+        os.environ["GEMINI_API_KEY"] = gemini_api_key
+        
+        # Use gemini-2.5-flash model
+        # LiteLLM requires the format: gemini/gemini-{version}-{model}
+        gemini_llm = LLM(
+            model="gemini/gemini-2.5-flash",
+            api_key=gemini_api_key
+        )
+        
         return Agent(
             config=self.agents_config['firebase_agent'], # type: ignore[index]
             verbose=False,
-            tools=[FirebaseReadOnlyTool()]
+            tools=[FirebaseReadOnlyTool()],
+            llm=gemini_llm
         )
 
 

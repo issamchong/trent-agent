@@ -40,7 +40,8 @@ class FirebaseReadOnlyTool(BaseTool):
 
     name: str = "Firebase Read-Only Tool"
     description: str = (
-        "Read documents from Firestore using the Google Cloud client library. "
+        "Read documents from the 'products' collection in Firestore 'trent' database. "
+        "Only returns 'categoryId' and 'title' fields. "
         "Supports real-time snapshot caching to avoid re-reading full collections."
     )
     args_schema: type[BaseModel] = FirebaseToolInput
@@ -84,7 +85,17 @@ class FirebaseReadOnlyTool(BaseTool):
         if not project_id:
             raise ValueError("Service account JSON must include 'project_id'.")
 
-        self._db = firestore.Client(project=project_id, credentials=credentials_obj)
+        # Use 'trent' database instead of default
+        self._db = firestore.Client(project=project_id, credentials=credentials_obj, database='trent')
+
+    def _filter_product_fields(self, doc_data: Dict[str, Any], doc_id: str) -> Dict[str, Any]:
+        """Filter document to only include categoryId and title fields."""
+        filtered = {
+            "_id": doc_id,
+            "title": doc_data.get("title", ""),
+            "categoryId": doc_data.get("categoryId", "")
+        }
+        return filtered
 
     def _normalize_timestamp(self, value: Any) -> Optional[datetime]:
         if value is None:
@@ -165,33 +176,37 @@ class FirebaseReadOnlyTool(BaseTool):
                         },
                     )
 
-                    # Handle document changes (added, modified, removed)
-                    if changes:
-                        for change in changes:
-                            doc = change.document
-                            change_type = change.type.name  # ADDED, MODIFIED, or REMOVED
-                            
-                            if change_type == "REMOVED":
-                                # Handle removed documents
-                                entry["documents"].pop(doc.id, None)
-                            elif change_type == "ADDED":
-                                # Handle new documents
-                                doc_data = doc.to_dict()
-                                last_update_field = doc_data.get("lastUpdate", getattr(doc, "update_time", None))
-                                self._update_cache_entry(collection, doc.id, doc_data, last_update_field)
-                            elif change_type == "MODIFIED":
-                                # Handle modified documents
-                                doc_data = doc.to_dict()
-                                last_update_field = doc_data.get("lastUpdate", getattr(doc, "update_time", None))
-                                self._update_cache_entry(collection, doc.id, doc_data, last_update_field)
-                    else:
-                        # Initial snapshot - populate all documents
+                    # Check if this is the initial snapshot (cache not ready yet)
+                    is_initial_snapshot = not entry.get("ready", False)
+                    
+                    if is_initial_snapshot:
+                        # Initial snapshot - populate all documents once
                         for doc in collection_snapshot:
                             doc_data = doc.to_dict()
                             last_update_field = doc_data.get("lastUpdate", getattr(doc, "update_time", None))
                             self._update_cache_entry(collection, doc.id, doc_data, last_update_field)
-
-                    entry["ready"] = True
+                        entry["ready"] = True
+                    else:
+                        # Subsequent snapshots - only process changes (on_snapshot only fires on changes)
+                        if changes:
+                            for change in changes:
+                                doc = change.document
+                                change_type = change.type.name  # ADDED, MODIFIED, or REMOVED
+                                
+                                if change_type == "REMOVED":
+                                    # Handle removed documents
+                                    entry["documents"].pop(doc.id, None)
+                                elif change_type == "ADDED":
+                                    # Handle new documents
+                                    doc_data = doc.to_dict()
+                                    last_update_field = doc_data.get("lastUpdate", getattr(doc, "update_time", None))
+                                    self._update_cache_entry(collection, doc.id, doc_data, last_update_field)
+                                elif change_type == "MODIFIED":
+                                    # Handle modified documents
+                                    doc_data = doc.to_dict()
+                                    last_update_field = doc_data.get("lastUpdate", getattr(doc, "update_time", None))
+                                    self._update_cache_entry(collection, doc.id, doc_data, last_update_field)
+                        # If no changes, do nothing - cache is already up to date
 
                 # Use the built-in on_snapshot method from google.cloud.firestore
                 # This sets up a real-time listener for the collection
@@ -262,14 +277,15 @@ class FirebaseReadOnlyTool(BaseTool):
             last_update_field = doc_data.get("lastUpdate", getattr(doc, "update_time", None))
             self._update_cache_entry(collection, doc.id, doc_data, last_update_field)
             if return_objects:
-                payload = doc_data.copy()
-                payload["_id"] = doc.id
-                results.append(payload)
+                # Only return categoryId and title
+                filtered_payload = self._filter_product_fields(doc_data, doc.id)
+                results.append(filtered_payload)
             elif total_count <= 10:
+                # Only show categoryId and title (no RTL markers in tool output)
+                title = str(doc_data.get('title', 'No title'))
+                category_id = str(doc_data.get('categoryId', 'No category'))
                 results.append(
-                    f"Document: {{'title': {doc_data.get('title', 'No title')}, "
-                    f"'status': {doc_data.get('status', 'No status')}, "
-                    f"'category': {doc_data.get('category', 'No category')}}}"
+                    f"{total_count}. Title: {title}, CategoryId: {category_id}"
                 )
 
         if return_objects:
@@ -299,6 +315,10 @@ class FirebaseReadOnlyTool(BaseTool):
     ) -> str:
         try:
             if operation == "read":
+                # Only allow reads from 'products' collection
+                if collection != "products":
+                    return f"Error: Only 'products' collection is supported. Requested: '{collection}'"
+                
                 if not document_id:
                     return "Error: document_id is required for read operation."
 
@@ -308,22 +328,46 @@ class FirebaseReadOnlyTool(BaseTool):
                     doc_data = doc_snapshot.to_dict()
                     last_update_field = doc_data.get("lastUpdate", getattr(doc_snapshot, "update_time", None))
                     self._update_cache_entry(collection, doc_snapshot.id, doc_data, last_update_field)
-                    return f"Document data: {doc_data}"
+                    # Only return categoryId and title
+                    filtered_data = self._filter_product_fields(doc_data, doc_snapshot.id)
+                    return f"Document data: {filtered_data}"
                 return f"Document {document_id} not found in collection {collection}."
 
             if operation == "query":
+                # Only allow queries to 'products' collection
+                if collection != "products":
+                    return f"Error: Only 'products' collection is supported. Requested: '{collection}'"
+                
                 collection_ref = self._db.collection(collection)
                 cache_entry = self._ensure_collection_listener(collection)
 
                 if not query_conditions:
                     documents = cache_entry.get("documents", {})
                     total_count = len(documents)
+                    
+                    # Wait for snapshot listener to populate cache (only reads on changes after initial load)
+                    # Only do direct query as last resort if snapshot listener failed
+                    if total_count == 0 and not cache_entry.get("ready") and cache_entry.get("listener_error"):
+                        try:
+                            # Last resort: Query directly only if snapshot listener failed
+                            docs = list(collection_ref.stream())
+                            for doc in docs:
+                                doc_data = doc.to_dict()
+                                last_update_field = doc_data.get("lastUpdate", getattr(doc, "update_time", None))
+                                self._update_cache_entry(collection, doc.id, doc_data, last_update_field)
+                            
+                            # Update cache entry after populating
+                            documents = cache_entry.get("documents", {})
+                            total_count = len(documents)
+                            cache_entry["ready"] = True
+                        except Exception as exc:
+                            return f"Error querying collection: {exc}"
 
                     if return_objects:
                         payload = []
                         for doc_id, doc_data in documents.items():
-                            item = doc_data.copy()
-                            item["_id"] = doc_id
+                            # Only return categoryId and title
+                            item = self._filter_product_fields(doc_data, doc_id)
                             payload.append(item)
                         try:
                             return json.dumps({"total": total_count, "documents": payload}, default=str)
@@ -334,10 +378,11 @@ class FirebaseReadOnlyTool(BaseTool):
                     for idx, doc_data in enumerate(documents.values(), start=1):
                         if idx > 10:
                             break
+                        # Only show categoryId and title (no RTL markers in tool output)
+                        title = str(doc_data.get('title', 'No title'))
+                        category_id = str(doc_data.get('categoryId', 'No category'))
                         summaries.append(
-                            f"Document: {{'title': {doc_data.get('title', 'No title')}, "
-                            f"'status': {doc_data.get('status', 'No status')}, "
-                            f"'category': {doc_data.get('category', 'No category')}}}"
+                            f"{idx}. Title: {title}, CategoryId: {category_id}"
                         )
 
                     lines = [
@@ -346,6 +391,7 @@ class FirebaseReadOnlyTool(BaseTool):
                         *summaries,
                         "\nTo get specific document details, use the 'read' operation with a document ID.",
                     ]
+                    # Return plain text without RTL markers - formatting will be applied later
                     return "\n".join(lines)
 
                 # Convert condition dicts to QueryCondition models
@@ -384,9 +430,15 @@ class FirebaseReadOnlyTool(BaseTool):
                         total_count = len(matching_docs)
 
                         if return_objects:
+                            # Filter to only return categoryId and title
+                            filtered_docs = []
+                            for doc_data in matching_docs:
+                                doc_id = doc_data.get("_id", "")
+                                filtered_doc = self._filter_product_fields(doc_data, doc_id)
+                                filtered_docs.append(filtered_doc)
                             try:
                                 return json.dumps(
-                                    {"total": total_count, "documents": matching_docs}, default=str
+                                    {"total": total_count, "documents": filtered_docs}, default=str
                                 )
                             except Exception as exc:
                                 return f"Error serializing documents: {exc}"
@@ -395,10 +447,11 @@ class FirebaseReadOnlyTool(BaseTool):
                         for idx, doc_data in enumerate(matching_docs, start=1):
                             if idx > 10:
                                 break
+                            # Only show categoryId and title (no RTL markers in tool output)
+                            title = str(doc_data.get('title', 'No title'))
+                            category_id = str(doc_data.get('categoryId', 'No category'))
                             summaries.append(
-                                f"Document: {{'title': {doc_data.get('title', 'No title')}, "
-                                f"'status': {doc_data.get('status', 'No status')}, "
-                                f"'category': {doc_data.get('category', 'No category')}}}"
+                                f"{idx}. Title: {title}, CategoryId: {category_id}"
                             )
 
                         lines = [

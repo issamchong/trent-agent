@@ -1,2 +1,2 @@
 crewai>=0.201.1,<1.0.0
-firebase-admin>=7.1.0
+google-cloud-firestore>=2.11.0

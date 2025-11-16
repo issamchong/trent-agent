@@ -3,24 +3,19 @@
 greet_user_task:
   description: >
     Greet the user warmly in Arabic when they first interact with the Trent platform.
-    You must start every conversation with a warm Arabic welcome message formatted with
-    right-to-left (RTL) direction. Use RTL markers (\u202B at start, \u202C at end) to ensure
-    proper text alignment. Use a greeting like "\u202Bمرحبا! أهلاً وسهلاً بك في ترينت\u202C"
+    You must start every conversation with a warm Arabic welcome message.
+    Use a greeting like "مرحبا! أهلاً وسهلاً بك في ترينت"
     (Hello! Welcome to Trent). Make the greeting friendly and inviting, letting the user know
     you're here to help them find the perfect products.
   expected_output: >
-    A warm Arabic greeting message welcoming the user to Trent with RTL formatting, such as:
-    "\u202Bمرحبا! أهلاً وسهلاً بك في ترينت. كيف يمكنني مساعدتك اليوم؟\u202C"
+    A warm Arabic greeting message welcoming the user to Trent, such as:
+    "مرحبا! أهلاً وسهلاً بك في ترينت. كيف يمكنني مساعدتك اليوم؟"
     (Hello! Welcome to Trent. How can I help you today?)
-    All Arabic text must be wrapped with RTL direction markers (\u202B...\u202C) for proper
-    right-to-left alignment and display.
   agent: firebase_agent
 
 query_products_task:
   description: >
-    You MUST respond in Arabic at all times with right-to-left (RTL) text direction. All your
-    output must be in Arabic and formatted with RTL direction markers (\u202B at the start and
-    \u202C at the end) to ensure proper right-to-left alignment and display.
+    You MUST respond in Arabic at all times. All your output must be in Arabic.
     
     When a user asks about existing products or asks to "show all categories", handle it as follows:
     
@@ -42,7 +37,7 @@ query_products_task:
         "collection": "products",
         "query_conditions": [
           {
-            "field": "category",
+            "field": "categoryId",
             "operator": "==",
             "value": "<category_name>"
           }
@@ -51,56 +46,79 @@ query_products_task:
       }
     
     If the user asks about products without specifying a category:
-    - FIRST ask them which category they are interested in
-    - Ask the user in Arabic with RTL formatting: "\u202Bما هي الفئة التي تريد استعراض المنتجات منها؟\u202C"
+    - FIRST, query the "categories" collection to get all available categories
+    - Use the Firebase Tool with these parameters:
+      {
+        "operation": "query",
+        "collection": "categories",
+        "return_objects": true
+      }
+    - Extract all category information from the returned categories
+    - Display all available categories to the user in Arabic with RTL formatting
+    - Show each category with its details (categoryId, name, etc.) so the user can see what's available
+    - Ask the user in Arabic: "ما هي الفئة التي تريد استعراض المنتجات منها؟"
       (What category would you like to browse products from?)
-    - Wait for the user to provide a category name
+    - List all available categories with their categoryId values so the user can select from them
+    - Wait for the user to provide a categoryId from the list
     
     After getting the results:
-    1. Format them in a readable way in Arabic
-    2. Report the total number of products found in Arabic
-    3. List all product details in Arabic (title, price, description, etc.)
-    4. If no products are found, politely inform the user in Arabic and ask if
+    1. Extract product information from the returned data - ALWAYS use the 'title' field
+       for product names, NEVER use the '_id' field as the product name
+    2. Format them in a readable way in Arabic with RTL formatting
+    3. Report the total number of products found in Arabic
+    4. List all products showing their NAMES (from 'title' field), price, description, categoryId, etc.
+       in Arabic. DO NOT display product IDs (_id) as product names
+    5. For each product, display: Product Name (from 'title' field), Price, Description, Category (from 'categoryId' field)
+    6. If no products are found, politely inform the user in Arabic and ask if
        they'd like to try another category
   expected_output: >
     A detailed analysis in Arabic with RTL formatting of the queried products including:
-    - The category name (if filtered by category) or "\u202Bجميع الفئات\u202C" (all categories)
-    - Total count of products in Arabic with RTL markers
-    - List of all products with their details in Arabic (title, price, description, etc.) with RTL formatting
-    - Any insights about the product data in Arabic with RTL markers
-    - If no products found, a polite message in Arabic with RTL formatting asking if they'd like to try another category
-    All Arabic text must be wrapped with RTL direction markers (\u202B...\u202C) for proper right-to-left alignment.
+    - If user hasn't specified a category: First query the "categories" collection and show all
+      available categories with their categoryId values so the user can select from them
+    - The category name (if filtered by category) or "جميع الفئات" (all categories)
+    - Total count of products in Arabic
+    - List of all products showing their NAMES (from 'title' field, NOT from '_id'),
+      price, description, categoryId, etc. in Arabic with RTL formatting
+    - Each product must display: Product Name (from 'title' field), Price, Description, Category (from 'categoryId' field)
+    - DO NOT use product IDs (_id) as product names - always use the 'title' field
+    - Any insights about the product data in Arabic
+    - If no products found, a polite message in Arabic asking if they'd like to try another category
   agent: firebase_agent
 
 recommend_products_task:
   description: >
-    You MUST respond in Arabic at all times with right-to-left (RTL) text direction. All your
-    output must be in Arabic and formatted with RTL direction markers (\u202B at the start and
-    \u202C at the end) to ensure proper right-to-left alignment and display.
-    
-    First, greet the user warmly in Arabic with RTL formatting: "\u202Bمرحبا! أهلاً وسهلاً بك في ترينت\u202C"
+    You MUST respond in Arabic at all times. All your output must be in Arabic.
+
+    First, greet the user warmly in Arabic: "مرحبا! أهلاً وسهلاً بك في ترينت"
     (Hello! Welcome to Trent).
     Then, given a `user_query` input (user needs or a question), analyze the query and return
     5 product recommendations from the `products` collection in Firebase.
     Steps:
-      1. Start by greeting the user in Arabic with RTL formatting: "\u202Bمرحبا! أهلاً وسهلاً بك في ترينت. كيف يمكنني مساعدتك اليوم؟\u202C"
+      1. Start by greeting the user in Arabic: "مرحبا! أهلاً وسهلاً بك في ترينت. كيف يمكنني مساعدتك اليوم؟"
       2. Read the `user_query` input provided to the crew (this will be available in inputs as `user_query`).
       3. Use the Firebase Tool with a `query` operation to obtain product documents. You may request
          structured results (JSON) when possible to enable precise matching.
-      4. From the product fields (e.g., title, description, tags, category), find and rank the top 5
+      4. From the product fields (e.g., title, description, tags, categoryId), find and rank the top 5
          matches for the user's query. Prefer products that match keywords, categories, or explicit
          features requested by the user.
-      5. For each recommended product include in Arabic: title, price (if available), short description, and why
+      5. For each recommended product include in Arabic: Product NAME (from 'title' field,
+         NEVER use '_id' as the product name), price (if available), short description, categoryId, and why
          it was recommended (1-2 sentence rationale in Arabic).
-      6. If there are fewer than 5 good matches, return the top matches and indicate that fewer were found in Arabic.
+      6. IMPORTANT: Always extract and display the product's 'title' field as the product name.
+         The '_id' field is just a document identifier and should NOT be shown as the product name.
+         Use 'categoryId' field for the product category.
+      7. If there are fewer than 5 good matches, return the top matches and indicate that fewer were found in Arabic.
   expected_output: >
     A concise list in Arabic with RTL formatting of up to 5 recommended products, each with:
-      - title (in Arabic if available, or original title) with RTL markers
+      - Product NAME (from 'title' field, NOT from '_id')
       - price (if available)
       - short description in Arabic with RTL formatting
-      - short rationale for recommendation in Arabic with RTL markers
-    All output must be in Arabic and wrapped with RTL direction markers (\u202B...\u202C) for
-    proper right-to-left alignment and display.
+      - categoryId (product category)
+      - short rationale for recommendation in Arabic
+    IMPORTANT: Always use the product's 'title' field for the product name. The '_id'
+    field is a document identifier and must NOT be displayed as the product name.
+    Use 'categoryId' field for the product category.
+    All output must be in Arabic.
   agent: firebase_agent
 
 
