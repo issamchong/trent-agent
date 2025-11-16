@@ -15,10 +15,35 @@ greet_user_task:
 
 query_products_task:
   description: >
-    When a user asks about existing products, you must handle it as follows:
+    You MUST respond in Arabic at all times. All your output must be in Arabic.
+    
+    When a user asks about existing products or asks to "show all categories", handle it as follows:
+    
+    If the user asks to "show all categories" or "show all products" or similar requests:
+    - Get ALL products from the products collection without any category filter
+    - Use the Firebase Tool with these parameters:
+      {
+        "operation": "query",
+        "collection": "products",
+        "return_objects": true
+      }
+    - Display all products organized by category in Arabic
     
     If the user mentions a specific category in their query:
-    - Use that category directly to query products
+    - Use that category directly to query products filtered by that category
+    - Use the Firebase Tool with these parameters:
+      {
+        "operation": "query",
+        "collection": "products",
+        "query_conditions": [
+          {
+            "field": "category",
+            "operator": "==",
+            "value": "<category_name>"
+          }
+        ],
+        "return_objects": true
+      }
     
     If the user asks about products without specifying a category:
     - FIRST ask them which category they are interested in
@@ -26,38 +51,25 @@ query_products_task:
       (What category would you like to browse products from?)
     - Wait for the user to provide a category name
     
-    Once you have the category (either from the user's query or their response), use the Firebase Tool
-    to query products filtered by that category. To query products by category, use these parameters:
-    {
-      "operation": "query",
-      "collection": "products",
-      "query_conditions": [
-        {
-          "field": "category",
-          "operator": "==",
-          "value": "<category_name>"
-        }
-      ],
-      "return_objects": true
-    }
-    
     After getting the results:
-    1. Format them in a readable way
-    2. Report the total number of products found in that category
-    3. List all product details for products in that category (title, price, description, etc.)
-    4. If no products are found in that category, politely inform the user in Arabic and ask if
+    1. Format them in a readable way in Arabic
+    2. Report the total number of products found in Arabic
+    3. List all product details in Arabic (title, price, description, etc.)
+    4. If no products are found, politely inform the user in Arabic and ask if
        they'd like to try another category
   expected_output: >
-    A detailed analysis of the queried products in the specified category including:
-    - The category name
-    - Total count of products in that category
-    - List of all products with their details (title, price, description, etc.)
-    - Any insights about the product data
-    - If no products found, a polite message asking if they'd like to try another category
+    A detailed analysis in Arabic of the queried products including:
+    - The category name (if filtered by category) or "جميع الفئات" (all categories)
+    - Total count of products in Arabic
+    - List of all products with their details in Arabic (title, price, description, etc.)
+    - Any insights about the product data in Arabic
+    - If no products found, a polite message in Arabic asking if they'd like to try another category
   agent: firebase_agent
 
 recommend_products_task:
   description: >
+    You MUST respond in Arabic at all times. All your output must be in Arabic.
+    
     First, greet the user warmly in Arabic with "مرحبا! أهلاً وسهلاً بك في ترينت" (Hello! Welcome to Trent).
     Then, given a `user_query` input (user needs or a question), analyze the query and return
     5 product recommendations from the `products` collection in Firebase.
@@ -69,16 +81,16 @@ recommend_products_task:
       4. From the product fields (e.g., title, description, tags, category), find and rank the top 5
          matches for the user's query. Prefer products that match keywords, categories, or explicit
          features requested by the user.
-      5. For each recommended product include: title, price (if available), short description, and why
-         it was recommended (1-2 sentence rationale).
-      6. If there are fewer than 5 good matches, return the top matches and indicate that fewer were found.
+      5. For each recommended product include in Arabic: title, price (if available), short description, and why
+         it was recommended (1-2 sentence rationale in Arabic).
+      6. If there are fewer than 5 good matches, return the top matches and indicate that fewer were found in Arabic.
   expected_output: >
-    A concise list of up to 5 recommended products, each with:
-      - title
+    A concise list in Arabic of up to 5 recommended products, each with:
+      - title (in Arabic if available, or original title)
       - price (if available)
-      - short description
-      - short rationale for recommendation
-    Also include the original `user_query` you used to generate recommendations.
+      - short description in Arabic
+      - short rationale for recommendation in Arabic
+    All output must be in Arabic.
   agent: firebase_agent
 
 
