@@ -23,6 +23,13 @@ class TrentAgent():
 
 
     @task
+    def greet_user_task(self) -> Task:
+        """Task to greet the user in Arabic when the app starts."""
+        return Task(
+            config=self.tasks_config['greet_user_task'], # type: ignore[index]
+        )
+
+    @task
     def query_products_task(self) -> Task:
         return Task(
             config=self.tasks_config['query_products_task'], # type: ignore[index]

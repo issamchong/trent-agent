@@ -1,39 +1,77 @@
 
 
+greet_user_task:
+  description: >
+    Greet the user warmly in Arabic when they first interact with the Trent platform.
+    You must start every conversation with a warm Arabic welcome message.
+    Use a greeting like "مرحبا! أهلاً وسهلاً بك في ترينت" (Hello! Welcome to Trent).
+    Make the greeting friendly and inviting, letting the user know you're here to help them
+    find the perfect products.
+  expected_output: >
+    A warm Arabic greeting message welcoming the user to Trent, such as:
+    "مرحبا! أهلاً وسهلاً بك في ترينت. كيف يمكنني مساعدتك اليوم؟"
+    (Hello! Welcome to Trent. How can I help you today?)
+  agent: firebase_agent
+
 query_products_task:
   description: >
-    Use the Firebase Tool to query all products from the 'products' collection.
-    To query all products, use these parameters:
+    When a user asks about existing products, you must handle it as follows:
+    
+    If the user mentions a specific category in their query:
+    - Use that category directly to query products
+    
+    If the user asks about products without specifying a category:
+    - FIRST ask them which category they are interested in
+    - Ask the user in Arabic: "ما هي الفئة التي تريد استعراض المنتجات منها؟" 
+      (What category would you like to browse products from?)
+    - Wait for the user to provide a category name
+    
+    Once you have the category (either from the user's query or their response), use the Firebase Tool
+    to query products filtered by that category. To query products by category, use these parameters:
     {
       "operation": "query",
-      "collection": "products"
+      "collection": "products",
+      "query_conditions": [
+        {
+          "field": "category",
+          "operator": "==",
+          "value": "<category_name>"
+        }
+      ],
+      "return_objects": true
     }
-    The query operation does not require document_id or data parameters.
+    
     After getting the results:
     1. Format them in a readable way
-    2. Report the total number of products found
-    3. List all product details
+    2. Report the total number of products found in that category
+    3. List all product details for products in that category (title, price, description, etc.)
+    4. If no products are found in that category, politely inform the user in Arabic and ask if
+       they'd like to try another category
   expected_output: >
-    A detailed analysis of the queried products including:
-    - Total count of products
-    - List of all products with their details
+    A detailed analysis of the queried products in the specified category including:
+    - The category name
+    - Total count of products in that category
+    - List of all products with their details (title, price, description, etc.)
     - Any insights about the product data
+    - If no products found, a polite message asking if they'd like to try another category
   agent: firebase_agent
 
 recommend_products_task:
   description: >
-    Given a `user_query` input (user needs or a question), analyze the query and return
+    First, greet the user warmly in Arabic with "مرحبا! أهلاً وسهلاً بك في ترينت" (Hello! Welcome to Trent).
+    Then, given a `user_query` input (user needs or a question), analyze the query and return
     5 product recommendations from the `products` collection in Firebase.
     Steps:
-      1. Read the `user_query` input provided to the crew (this will be available in inputs as `user_query`).
-      2. Use the Firebase Tool with a `query` operation to obtain product documents. You may request
+      1. Start by greeting the user in Arabic: "مرحبا! أهلاً وسهلاً بك في ترينت. كيف يمكنني مساعدتك اليوم؟"
+      2. Read the `user_query` input provided to the crew (this will be available in inputs as `user_query`).
+      3. Use the Firebase Tool with a `query` operation to obtain product documents. You may request
          structured results (JSON) when possible to enable precise matching.
-      3. From the product fields (e.g., title, description, tags, category), find and rank the top 5
+      4. From the product fields (e.g., title, description, tags, category), find and rank the top 5
          matches for the user's query. Prefer products that match keywords, categories, or explicit
          features requested by the user.
-      4. For each recommended product include: title, price (if available), short description, and why
+      5. For each recommended product include: title, price (if available), short description, and why
          it was recommended (1-2 sentence rationale).
-      5. If there are fewer than 5 good matches, return the top matches and indicate that fewer were found.
+      6. If there are fewer than 5 good matches, return the top matches and indicate that fewer were found.
   expected_output: >
     A concise list of up to 5 recommended products, each with:
       - title
