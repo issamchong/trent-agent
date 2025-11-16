@@ -3,19 +3,24 @@
 greet_user_task:
   description: >
     Greet the user warmly in Arabic when they first interact with the Trent platform.
-    You must start every conversation with a warm Arabic welcome message.
-    Use a greeting like "مرحبا! أهلاً وسهلاً بك في ترينت" (Hello! Welcome to Trent).
-    Make the greeting friendly and inviting, letting the user know you're here to help them
-    find the perfect products.
+    You must start every conversation with a warm Arabic welcome message formatted with
+    right-to-left (RTL) direction. Use RTL markers (\u202B at start, \u202C at end) to ensure
+    proper text alignment. Use a greeting like "\u202Bمرحبا! أهلاً وسهلاً بك في ترينت\u202C"
+    (Hello! Welcome to Trent). Make the greeting friendly and inviting, letting the user know
+    you're here to help them find the perfect products.
   expected_output: >
-    A warm Arabic greeting message welcoming the user to Trent, such as:
-    "مرحبا! أهلاً وسهلاً بك في ترينت. كيف يمكنني مساعدتك اليوم؟"
+    A warm Arabic greeting message welcoming the user to Trent with RTL formatting, such as:
+    "\u202Bمرحبا! أهلاً وسهلاً بك في ترينت. كيف يمكنني مساعدتك اليوم؟\u202C"
     (Hello! Welcome to Trent. How can I help you today?)
+    All Arabic text must be wrapped with RTL direction markers (\u202B...\u202C) for proper
+    right-to-left alignment and display.
   agent: firebase_agent
 
 query_products_task:
   description: >
-    You MUST respond in Arabic at all times. All your output must be in Arabic.
+    You MUST respond in Arabic at all times with right-to-left (RTL) text direction. All your
+    output must be in Arabic and formatted with RTL direction markers (\u202B at the start and
+    \u202C at the end) to ensure proper right-to-left alignment and display.
     
     When a user asks about existing products or asks to "show all categories", handle it as follows:
     
@@ -47,7 +52,7 @@ query_products_task:
     
     If the user asks about products without specifying a category:
     - FIRST ask them which category they are interested in
-    - Ask the user in Arabic: "ما هي الفئة التي تريد استعراض المنتجات منها؟" 
+    - Ask the user in Arabic with RTL formatting: "\u202Bما هي الفئة التي تريد استعراض المنتجات منها؟\u202C"
       (What category would you like to browse products from?)
     - Wait for the user to provide a category name
     
@@ -58,23 +63,27 @@ query_products_task:
     4. If no products are found, politely inform the user in Arabic and ask if
        they'd like to try another category
   expected_output: >
-    A detailed analysis in Arabic of the queried products including:
-    - The category name (if filtered by category) or "جميع الفئات" (all categories)
-    - Total count of products in Arabic
-    - List of all products with their details in Arabic (title, price, description, etc.)
-    - Any insights about the product data in Arabic
-    - If no products found, a polite message in Arabic asking if they'd like to try another category
+    A detailed analysis in Arabic with RTL formatting of the queried products including:
+    - The category name (if filtered by category) or "\u202Bجميع الفئات\u202C" (all categories)
+    - Total count of products in Arabic with RTL markers
+    - List of all products with their details in Arabic (title, price, description, etc.) with RTL formatting
+    - Any insights about the product data in Arabic with RTL markers
+    - If no products found, a polite message in Arabic with RTL formatting asking if they'd like to try another category
+    All Arabic text must be wrapped with RTL direction markers (\u202B...\u202C) for proper right-to-left alignment.
   agent: firebase_agent
 
 recommend_products_task:
   description: >
-    You MUST respond in Arabic at all times. All your output must be in Arabic.
+    You MUST respond in Arabic at all times with right-to-left (RTL) text direction. All your
+    output must be in Arabic and formatted with RTL direction markers (\u202B at the start and
+    \u202C at the end) to ensure proper right-to-left alignment and display.
     
-    First, greet the user warmly in Arabic with "مرحبا! أهلاً وسهلاً بك في ترينت" (Hello! Welcome to Trent).
+    First, greet the user warmly in Arabic with RTL formatting: "\u202Bمرحبا! أهلاً وسهلاً بك في ترينت\u202C"
+    (Hello! Welcome to Trent).
     Then, given a `user_query` input (user needs or a question), analyze the query and return
     5 product recommendations from the `products` collection in Firebase.
     Steps:
-      1. Start by greeting the user in Arabic: "مرحبا! أهلاً وسهلاً بك في ترينت. كيف يمكنني مساعدتك اليوم؟"
+      1. Start by greeting the user in Arabic with RTL formatting: "\u202Bمرحبا! أهلاً وسهلاً بك في ترينت. كيف يمكنني مساعدتك اليوم؟\u202C"
       2. Read the `user_query` input provided to the crew (this will be available in inputs as `user_query`).
       3. Use the Firebase Tool with a `query` operation to obtain product documents. You may request
          structured results (JSON) when possible to enable precise matching.
@@ -85,12 +94,13 @@ recommend_products_task:
          it was recommended (1-2 sentence rationale in Arabic).
       6. If there are fewer than 5 good matches, return the top matches and indicate that fewer were found in Arabic.
   expected_output: >
-    A concise list in Arabic of up to 5 recommended products, each with:
-      - title (in Arabic if available, or original title)
+    A concise list in Arabic with RTL formatting of up to 5 recommended products, each with:
+      - title (in Arabic if available, or original title) with RTL markers
       - price (if available)
-      - short description in Arabic
-      - short rationale for recommendation in Arabic
-    All output must be in Arabic.
+      - short description in Arabic with RTL formatting
+      - short rationale for recommendation in Arabic with RTL markers
+    All output must be in Arabic and wrapped with RTL direction markers (\u202B...\u202C) for
+    proper right-to-left alignment and display.
   agent: firebase_agent
 
 
