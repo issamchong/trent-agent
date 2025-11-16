@@ -23,8 +23,8 @@ class TrentAgent():
         # Set environment variable for LiteLLM (required for Gemini)
         os.environ["GEMINI_API_KEY"] = gemini_api_key
         
-        # Use gemini-2.5-flash model
-        # LiteLLM requires the format: gemini/gemini-{version}-{model}
+        # Use gemini-2.5-flash with prefix as requested
+        # LiteLLM format: gemini/gemini-{version}-{model}
         gemini_llm = LLM(
             model="gemini/gemini-2.5-flash",
             api_key=gemini_api_key
