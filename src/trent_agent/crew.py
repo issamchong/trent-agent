@@ -16,7 +16,9 @@ class TrentAgent():
     @agent
     def firebase_agent(self) -> Agent:
         # Configure Gemini LLM (using 2.5 Flash as requested)
-        gemini_api_key = os.getenv("GEMINI_API_KEY", "AIzaSyBmzUgklO1DTbiI8IVB9XsKHJFl41RUwGU")
+        gemini_api_key = os.getenv("GEMINI_API_KEY")
+        if not gemini_api_key:
+            raise ValueError("GEMINI_API_KEY environment variable is required")
         
         # Set environment variable for LiteLLM (required for Gemini)
         os.environ["GEMINI_API_KEY"] = gemini_api_key

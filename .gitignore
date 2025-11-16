@@ -2,3 +2,18 @@
 encode_credentials.json 
 __pycache__/
 .DS_Store
+
+# Test scripts (may contain secrets)
+test_*.py
+check_*.py
+*_test*.py
+*credentials*.py
+*env*.py
+quick_test_*.py
+resolve_*.py
+find_*.py
+list_*.py
+debug_*.py
+update_*.py
+create_*.py
+fix_*.py
